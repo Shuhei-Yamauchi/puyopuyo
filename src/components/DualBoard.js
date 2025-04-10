@@ -3,7 +3,7 @@ import React, { useRef, useEffect, useState } from 'react';
 // ◆ 定数・設定 ◆
 const COLS = 6;
 const ROWS = 12;
-const CELL_SIZE = 30; // 基本セルサイズ（後で CSS で拡大・縮小されても内部処理は同じ値）
+const CELL_SIZE = 30; // 内部処理上のセルサイズ
 const COLORS = ['red', 'green', 'blue', 'yellow'];
 const INITIAL_HP = 1000; // HP初期値
 const FALL_INTERVAL_MS = 600; // 落下間隔（ミリ秒）
@@ -31,7 +31,7 @@ function cloneBoard(board) {
 function checkAndPop(board) {
   const toPop = [];
   const visited = Array.from({ length: ROWS }, () => Array(COLS).fill(false));
-  const directions = [{ x:1, y:0 }, { x:-1, y:0 }, { x:0, y:1 }, { x:0, y:-1 }];
+  const directions = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }];
 
   function bfs(startRow, startCol) {
     const color = board[startRow][startCol];
@@ -110,7 +110,7 @@ function calcDamage(chainCount, popped) {
 // ◆ CPU の簡易移動ロジック ◆
 function cpuAutoMove(cpuPiece, cpuBoard) {
   const move = Math.floor(Math.random() * 4);
-  let newPiece = { ...cpuPiece, positions: cpuPiece.positions.map(p => ({...p})) };
+  let newPiece = { ...cpuPiece, positions: cpuPiece.positions.map(p => ({ ...p })) };
   if (move === 0) newPiece.positions.forEach(p => p.x--);
   else if (move === 1) newPiece.positions.forEach(p => p.x++);
   else if (move === 2) rotatePiece(newPiece);
@@ -145,14 +145,24 @@ function rotatePiece(piece) {
   }
 }
 
+//
+// ─── 改善版 DualBoard コンポーネント ─────────────────────────────
+//
 const DualBoard = () => {
-  // プレイヤー・CPUのボードと状態
-  const [playerBoard, setPlayerBoard] = useState(Array.from({ length: ROWS }, () => Array(COLS).fill(null)));
-  const [cpuBoard, setCpuBoard] = useState(Array.from({ length: ROWS }, () => Array(COLS).fill(null)));
-  const [playerHP, setPlayerHP] = useState(INITIAL_HP);
-  const [cpuHP, setCpuHP] = useState(INITIAL_HP);
-  const [playerPiece, setPlayerPiece] = useState(createNewPiece);
-  const [cpuPiece, setCpuPiece] = useState(createNewPiece);
+  // ゲーム状態をひとまとめにする
+  const [gameState, setGameState] = useState({
+    playerBoard: Array.from({ length: ROWS }, () => Array(COLS).fill(null)),
+    cpuBoard: Array.from({ length: ROWS }, () => Array(COLS).fill(null)),
+    playerPiece: createNewPiece(),
+    cpuPiece: createNewPiece(),
+    playerHP: INITIAL_HP,
+    cpuHP: INITIAL_HP,
+  });
+  // 最新の状態を参照するための ref
+  const gameStateRef = useRef(gameState);
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
 
   // Canvas の参照
   const playerCanvasRef = useRef(null);
@@ -184,43 +194,46 @@ const DualBoard = () => {
     });
   };
 
-  // ◆ ゲームループ：一定間隔で落下処理実行 ◆
-  useEffect(() => {
-    const interval = setInterval(() => { gameLoop(); }, FALL_INTERVAL_MS);
-    return () => clearInterval(interval);
-    // ※ gameLoop 内で状態更新しているため、依存配列には含めません
-  }, []);
-
+  // ◆ ゲームループ：定期的に状態を更新（重力・落下処理） ◆
   const gameLoop = () => {
+    // 現在の状態を取得
+    let { playerBoard, playerPiece, cpuBoard, cpuPiece, playerHP, cpuHP } = gameStateRef.current;
+
     // プレイヤーの落下処理
     const newPlayerPiece = movePieceDown(playerPiece, playerBoard, (lockedBoard) => {
       const boardCopy = cloneBoard(lockedBoard);
       const { chainCount, totalPopped } = resolveChains(boardCopy);
       if (chainCount > 0) {
-        const dmg = calcDamage(chainCount, totalPopped);
-        setCpuHP(prev => Math.max(prev - dmg, 0));
+        cpuHP = Math.max(cpuHP - calcDamage(chainCount, totalPopped), 0);
       }
-      setPlayerBoard(boardCopy);
+      playerBoard = boardCopy;
       return createNewPiece();
     });
-    // CPU の落下処理（ランダム移動後に落下）
+
+    // CPU の移動と落下処理（簡易ロジック）
     const cpuMovedPiece = cpuAutoMove(cpuPiece, cpuBoard);
     const newCpuPiece = movePieceDown(cpuMovedPiece, cpuBoard, (lockedBoard) => {
       const boardCopy = cloneBoard(lockedBoard);
       const { chainCount, totalPopped } = resolveChains(boardCopy);
       if (chainCount > 0) {
-        const dmg = calcDamage(chainCount, totalPopped);
-        setPlayerHP(prev => Math.max(prev - dmg, 0));
+        playerHP = Math.max(playerHP - calcDamage(chainCount, totalPopped), 0);
       }
-      setCpuBoard(boardCopy);
+      cpuBoard = boardCopy;
       return createNewPiece();
     });
 
-    setPlayerPiece(newPlayerPiece);
-    setCpuPiece(newCpuPiece);
+    // 最新の状態に更新
+    setGameState({
+      playerBoard,
+      cpuBoard,
+      playerPiece: newPlayerPiece,
+      cpuPiece: newCpuPiece,
+      playerHP,
+      cpuHP,
+    });
   };
 
-  // ◆ ピースを1セル下に移動する（衝突時は固定して連鎖処理）◆
+  // ◆ movePieceDown 関数（変更なし）◆
   const movePieceDown = (piece, board, onLock) => {
     const movedPiece = { ...piece, positions: piece.positions.map(p => ({ ...p, y: p.y + 1 })) };
     if (checkCollision(movedPiece, board)) {
@@ -231,73 +244,125 @@ const DualBoard = () => {
     }
   };
 
-  // ◆ キーボード操作ハンドラ（従来通り）◆
+  // ◆ ゲームループ開始 ◆
   useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === 'ArrowLeft')      { handleMoveLeft(); }
-      else if (e.key === 'ArrowRight') { handleMoveRight(); }
-      else if (e.key === 'ArrowUp')    { handleRotate(); }
-      else if (e.key === 'ArrowDown')  { handleMoveDown(); }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [playerPiece, playerBoard]);
+    const interval = setInterval(() => { gameLoop(); }, FALL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, []);
 
-  // ◆ モバイル操作用の個別ハンドラ ◆
-  const handleMoveLeft = () => {
-    const moved = { ...playerPiece, positions: playerPiece.positions.map(p => ({ ...p })) };
-    moved.positions.forEach(p => p.x--);
-    if (!checkCollision(moved, playerBoard)) setPlayerPiece(moved);
-  };
-
-  const handleMoveRight = () => {
-    const moved = { ...playerPiece, positions: playerPiece.positions.map(p => ({ ...p })) };
-    moved.positions.forEach(p => p.x++);
-    if (!checkCollision(moved, playerBoard)) setPlayerPiece(moved);
-  };
-
-  const handleRotate = () => {
-    const moved = { ...playerPiece, positions: playerPiece.positions.map(p => ({ ...p })) };
-    rotatePiece(moved);
-    if (!checkCollision(moved, playerBoard)) setPlayerPiece(moved);
-  };
-
-  const handleMoveDown = () => {
-    const fastDown = { ...playerPiece, positions: playerPiece.positions.map(p => ({ ...p, y: p.y + 1 })) };
-    if (checkCollision(fastDown, playerBoard)) {
-      lockPiece(playerPiece, playerBoard);
-      const boardCopy = cloneBoard(playerBoard);
-      const { chainCount, totalPopped } = resolveChains(boardCopy);
-      if (chainCount > 0) {
-        const dmg = calcDamage(chainCount, totalPopped);
-        setCpuHP(prev => Math.max(prev - dmg, 0));
+  // ◆ キーボード操作ハンドラ ◆
+  const handleKeyDown = (e) => {
+    // ゲームオーバーなら操作無視
+    if (gameState.playerHP <= 0 || gameState.cpuHP <= 0) return;
+    let { playerBoard, playerPiece } = gameState;
+    const newPiece = { ...playerPiece, positions: playerPiece.positions.map(p => ({ ...p })) };
+    if (e.key === 'ArrowLeft') {
+      newPiece.positions.forEach(p => p.x--);
+      if (!checkCollision(newPiece, playerBoard)) {
+        setGameState(prev => ({ ...prev, playerPiece: newPiece }));
       }
-      setPlayerBoard(boardCopy);
-      setPlayerPiece(createNewPiece());
-    } else {
-      setPlayerPiece(fastDown);
+    } else if (e.key === 'ArrowRight') {
+      newPiece.positions.forEach(p => p.x++);
+      if (!checkCollision(newPiece, playerBoard)) {
+        setGameState(prev => ({ ...prev, playerPiece: newPiece }));
+      }
+    } else if (e.key === 'ArrowUp') {
+      rotatePiece(newPiece);
+      if (!checkCollision(newPiece, playerBoard)) {
+        setGameState(prev => ({ ...prev, playerPiece: newPiece }));
+      }
+    } else if (e.key === 'ArrowDown') {
+      const fastDown = { ...playerPiece, positions: playerPiece.positions.map(p => ({ ...p, y: p.y + 1 })) };
+      if (checkCollision(fastDown, playerBoard)) {
+        lockPiece(playerPiece, playerBoard);
+        const boardCopy = cloneBoard(playerBoard);
+        const { chainCount, totalPopped } = resolveChains(boardCopy);
+        let newCpuHP = gameState.cpuHP;
+        if (chainCount > 0) {
+          newCpuHP = Math.max(gameState.cpuHP - calcDamage(chainCount, totalPopped), 0);
+        }
+        setGameState(prev => ({
+          ...prev,
+          playerBoard: boardCopy,
+          playerPiece: createNewPiece(),
+          cpuHP: newCpuHP
+        }));
+      } else {
+        setGameState(prev => ({ ...prev, playerPiece: fastDown }));
+      }
     }
   };
 
-  // ◆ Canvas 描画更新 ◆
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [gameState]);
+
+  // ◆ モバイル操作用ハンドラ ◆
+  const handleMoveLeft = () => {
+    let newPiece = { ...gameState.playerPiece, positions: gameState.playerPiece.positions.map(p => ({ ...p })) };
+    newPiece.positions.forEach(p => p.x--);
+    if (!checkCollision(newPiece, gameState.playerBoard)) {
+      setGameState(prev => ({ ...prev, playerPiece: newPiece }));
+    }
+  };
+
+  const handleMoveRight = () => {
+    let newPiece = { ...gameState.playerPiece, positions: gameState.playerPiece.positions.map(p => ({ ...p })) };
+    newPiece.positions.forEach(p => p.x++);
+    if (!checkCollision(newPiece, gameState.playerBoard)) {
+      setGameState(prev => ({ ...prev, playerPiece: newPiece }));
+    }
+  };
+
+  const handleRotate = () => {
+    let newPiece = { ...gameState.playerPiece, positions: gameState.playerPiece.positions.map(p => ({ ...p })) };
+    rotatePiece(newPiece);
+    if (!checkCollision(newPiece, gameState.playerBoard)) {
+      setGameState(prev => ({ ...prev, playerPiece: newPiece }));
+    }
+  };
+
+  const handleMoveDown = () => {
+    const fastDown = { ...gameState.playerPiece, positions: gameState.playerPiece.positions.map(p => ({ ...p, y: p.y + 1 })) };
+    if (checkCollision(fastDown, gameState.playerBoard)) {
+      lockPiece(gameState.playerPiece, gameState.playerBoard);
+      const boardCopy = cloneBoard(gameState.playerBoard);
+      const { chainCount, totalPopped } = resolveChains(boardCopy);
+      let newCpuHP = gameState.cpuHP;
+      if (chainCount > 0) {
+        newCpuHP = Math.max(gameState.cpuHP - calcDamage(chainCount, totalPopped), 0);
+      }
+      setGameState(prev => ({
+        ...prev,
+        playerBoard: boardCopy,
+        playerPiece: createNewPiece(),
+        cpuHP: newCpuHP
+      }));
+    } else {
+      setGameState(prev => ({ ...prev, playerPiece: fastDown }));
+    }
+  };
+
+  // ◆ Canvas 描画更新（状態変更時） ◆
   useEffect(() => {
     const pCanvas = playerCanvasRef.current;
     const cCanvas = cpuCanvasRef.current;
     if (!pCanvas || !cCanvas) return;
     const pCtx = pCanvas.getContext('2d');
     const cCtx = cCanvas.getContext('2d');
-    drawBoard(pCtx, playerBoard, playerPiece);
-    drawBoard(cCtx, cpuBoard, cpuPiece);
-  }, [playerBoard, cpuBoard, playerPiece, cpuPiece]);
+    drawBoard(pCtx, gameState.playerBoard, gameState.playerPiece);
+    drawBoard(cCtx, gameState.cpuBoard, gameState.cpuPiece);
+  }, [gameState]);
 
-  // ◆ ゲーム終了判定 ◆
+  const { playerHP, cpuHP } = gameState;
   const playerWins = cpuHP <= 0 && playerHP > 0;
   const cpuWins = playerHP <= 0 && cpuHP > 0;
   const isGameOver = playerWins || cpuWins;
 
   return (
     <div className="flex flex-col items-center w-full relative">
-      {/* フィールド部分：レスポンシブ対応のラッパー */}
+      {/* フィールド部分：レスポンシブ対応 */}
       <div className="flex flex-wrap justify-center gap-8 w-full">
         <div className="flex flex-col items-center">
           <h2 className="mb-2">Player HP: {playerHP}</h2>
@@ -330,7 +395,7 @@ const DualBoard = () => {
         </div>
       )}
 
-      {/* モバイル操作ボタン：幅が狭い端末で表示（md: 768px未満） */}
+      {/* モバイル操作ボタン（スマホで表示） */}
       <div className="md:hidden mt-4">
         <div className="flex justify-center space-x-2">
           <button onClick={handleMoveLeft} className="bg-gray-300 p-3 rounded">←</button>
