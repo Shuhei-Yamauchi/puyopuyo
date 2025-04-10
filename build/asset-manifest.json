@@ -1,0 +1,13 @@
+{
+  "files": {
+    "main.css": "/puyopuyo/static/css/main.38cdcc2e.css",
+    "main.js": "/puyopuyo/static/js/main.a368860f.js",
+    "index.html": "/puyopuyo/index.html",
+    "main.38cdcc2e.css.map": "/puyopuyo/static/css/main.38cdcc2e.css.map",
+    "main.a368860f.js.map": "/puyopuyo/static/js/main.a368860f.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.38cdcc2e.css",
+    "static/js/main.a368860f.js"
+  ]
+}

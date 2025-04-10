@@ -1,15 +1,18 @@
-import React from 'react';
-import GameCanvas from './components/GameCanvas';
+import React, { useState } from 'react';
+import DualBoard from './components/DualBoard';
 
 function App() {
+  const [gameKey, setGameKey] = useState(0); // 再スタート用
+
+  const handleRestart = () => {
+    setGameKey(prev => prev + 1); // コンポーネント再生成
+  };
+
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col items-center">
-      <header className="py-4">
-        <h1 className="text-3xl font-bold text-center">Puyo Puyo Game</h1>
-      </header>
-      <main>
-        <GameCanvas />
-      </main>
+    <div className="App" style={{ textAlign: 'center' }}>
+      <h1>Puyo Puyo vs CPU</h1>
+      <button onClick={handleRestart}>Restart Game</button>
+      <DualBoard key={gameKey} />
     </div>
   );
 }
